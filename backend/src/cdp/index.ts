@@ -5,12 +5,13 @@
 export {
   CdpConnection,
   CdpNotConnectedError,
-  FakeCdpTransport,
   type CdpConnectionStatus,
   type CdpConnectOptions,
   type CdpSessionInfo,
   type CdpTransport,
 } from "./connection.ts";
+
+export { FakeCdpTransport } from "./fake-transport.ts";
 
 export {
   DEFAULT_CDP_ENDPOINT,

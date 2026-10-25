@@ -90,6 +90,15 @@ Rules enforced by `CdpConnection`:
 Timeout handling: `Promise.race([attach, timeout])` with the timer always
 cleared in `finally`. `timeoutMs: 0` disables the timeout and skips the race.
 
+Late-connect handling (corrected in the F0 review pass): winning the race does
+not stop the browser from attaching afterwards. When the timeout wins, the
+manager detaches, and the in-flight attach is marked abandoned. If that attach
+then lands, the transport releases the session it just opened instead of
+registering it, so nothing survives the abandoned `connect()`. A late rejection
+is swallowed with a no-op handler because `Promise.race` already settled; left
+unhandled it would kill the process. `CdpConnection` never reports a
+late-landing session as connected, and a second `disconnect()` is a no-op.
+
 Error normalization happens once, at the boundary. A raw transport failure
 becomes `CdpUnavailableError` whose message contains the endpoint and a
 sanitized reason. The original error is kept as `cause` for local debugging
@@ -130,7 +139,10 @@ until F1.
 - Port `9223` is the CloakBrowser convention; port `9222` (legacy Brave) is
   treated as a security violation and refused.
 - Attach semantics: the legacy code deliberately avoids `browser.close()` in
-  several places because it attaches to a user's persistent browser.
+  several places because it attaches to a user's persistent browser. In
+  playwright, `close()` on a CDP-attached browser detaches the transport only;
+  the browser process, its tabs, and its session survive. This backend relies
+  on that distinction and never terminates the browser.
 - `playwright-core` installs with no bundled browser (~14 MB), so the
   dependency costs no browser toolchain.
 
@@ -155,18 +167,21 @@ differently.
 
 ## 8. Test design
 
-| File | Covers |
-|---|---|
-| `config.test.ts` | defaults, overrides, boundary ports, every rejection class, no cross-field leakage in messages |
-| `http.test.ts` | payload shape, loopback bind, 404 route, 404 method, query-string tolerance |
-| `cdp-connection.test.ts` | lazy start, connect, disconnect, idempotent detach, double-connect refusal, failure classification, timeout typing, timer cleanup, no secret leakage into messages |
-| `cdp-endpoint.test.ts` | 9223 default, trailing-slash normalization, 9222 refusal, non-loopback refusal, malformed refusal, boolean helper, health with an unreachable CDP endpoint, startup without a browser |
+| File | Tests | Covers |
+|---|---|---|
+| `config.test.ts` | 13 | defaults, overrides, boundary ports, every rejection class, no cross-field leakage in messages |
+| `http.test.ts` | 5 | payload shape, loopback bind, 404 route, 404 method, query-string tolerance |
+| `cdp-connection.test.ts` | 16 | lazy start, connect, disconnect, idempotent detach, double-connect refusal, failure classification, timeout typing, timer cleanup, no secret leakage into messages |
+| `cdp-endpoint.test.ts` | 9 | 9223 default, trailing-slash normalization, 9222 refusal, non-loopback refusal, malformed refusal, boolean helper, health with an unreachable CDP endpoint, startup without a browser |
+| `cdp-late-connect.test.ts` | 7 | late-connect release after timeout, single detach, no unhandled rejection, reusability, session-slot hygiene |
 
 All browser-dependent tests use `FakeCdpTransport`. The suite requires no
 CloakBrowser, no network, no LP Agent, no Fabriq, no PostgreSQL, and no
-production dataset.
+production dataset. No test uses a wall-clock timer: a slow attach is parked
+on a promise the test releases explicitly via `land()`, so timing assertions
+are deterministic rather than guessed.
 
-43 tests, all passing.
+50 tests, all passing.
 
 ## 9. Verification record
 
@@ -176,7 +191,7 @@ Node v24.22.1, macOS, run from `backend/`:
 |---|---|---|
 | `npm run typecheck` | 0 | no diagnostics |
 | `npm run build` | 0 | emits `dist/` (10 modules) |
-| `npm test` | 0 | 43 tests, 43 pass, 0 fail |
+| `npm test` | 0 | 50 tests, 50 pass, 0 fail |
 | `node dist/server.js` + `curl /health` | 0 | `{"status":"ok","service":"dllm-backend"}` |
 | `node dist/server.js` with port 9223 closed | 0 | server starts and serves; no CDP attempt |
 

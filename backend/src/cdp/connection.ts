@@ -182,6 +182,11 @@ export class CdpConnection {
       return await Promise.race([attached, promise]);
     } finally {
       clearTimeout(timer);
+      // If the attach rejects after the race already settled (timeout or a
+      // concurrent detach won), Promise.race ignores it. Attach a no-op
+      // handler so Node does not raise an unhandled rejection and kill the
+      // process. The session, if any, is released by the transport.
+      attached.catch(() => {});
     }
   }
 
@@ -197,53 +202,5 @@ export class CdpConnection {
     return new CdpUnavailableError(`CDP endpoint unreachable at ${options.endpoint}: ${message}`, {
       cause: error,
     });
-  }
-}
-
-/**
- * In-memory fake transport for tests. Never opens a socket, never imports
- * playwright, never needs CloakBrowser or network access.
- */
-export class FakeCdpTransport implements CdpTransport {
-  connectCalls = 0;
-  disconnectCalls = 0;
-  connected = false;
-  lastOptions: CdpConnectOptions | null = null;
-
-  private readonly behaviour: {
-    /** Delay before the fake connect settles. Used for timeout tests. */
-    readonly delayMs?: number;
-    /** When set, connect rejects with this value. */
-    readonly failWith?: unknown;
-  };
-
-  constructor(
-    behaviour: {
-      readonly delayMs?: number;
-      readonly failWith?: unknown;
-    } = {},
-  ) {
-    this.behaviour = behaviour;
-  }
-
-  async connect(options: CdpConnectOptions): Promise<CdpSessionInfo> {
-    this.connectCalls += 1;
-    this.lastOptions = options;
-    const delayMs = this.behaviour.delayMs ?? 0;
-    if (delayMs > 0) {
-      const { promise, resolve } = Promise.withResolvers<void>();
-      setTimeout(resolve, delayMs);
-      await promise;
-    }
-    if (this.behaviour.failWith !== undefined) {
-      throw this.behaviour.failWith;
-    }
-    this.connected = true;
-    return { endpoint: options.endpoint, browserVersion: "FakeBrowser/0.0.0" };
-  }
-
-  async disconnect(): Promise<void> {
-    this.disconnectCalls += 1;
-    this.connected = false;
   }
 }

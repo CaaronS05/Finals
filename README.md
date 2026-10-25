@@ -153,6 +153,10 @@ Connections are **opt-in and lazy**. Nothing connects at import time, at
 server startup, or on any HTTP route. A missing endpoint produces a typed
 `CdpUnavailableError`; the server keeps running.
 
+If a connect times out but the browser attaches anyway, that late session is
+released rather than left attached with no owner. `close()` on a CDP-attached
+browser detaches the transport only; the browser process is never terminated.
+
 The real adapter uses `playwright-core`'s `chromium.connectOverCDP`, the same
 mechanism the legacy repository uses. **Its compatibility with the current
 CloakBrowser build is UNVERIFIED** — no live instance was probed during F0.
@@ -195,6 +199,6 @@ Executed in this phase on Node v24.22.1:
 |---|---|
 | `npm --prefix backend run typecheck` | exit 0 |
 | `npm --prefix backend run build` | exit 0, emits `dist/` |
-| `npm --prefix backend test` | exit 0, 43 tests, 43 pass, 0 fail |
+| `npm --prefix backend test` | exit 0, 50 tests, 50 pass, 0 fail |
 | `node backend/dist/server.js` + `curl /health` | exit 0, `{"status":"ok","service":"dllm-backend"}` |
 | Server startup with no CloakBrowser | exit 0, port 9223 confirmed closed, server unaffected |

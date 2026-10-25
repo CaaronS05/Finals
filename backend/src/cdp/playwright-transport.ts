@@ -20,54 +20,81 @@
  *
  * `playwright-core` carries no bundled browser and downloads nothing on
  * install, so the dependency costs ~14MB and no browser toolchain.
+ *
+ * ATTACH-ONLY
+ * -----------
+ * `browser.close()` on a CDP-attached browser detaches the transport; it does
+ * not terminate the browser process. The user's CloakBrowser, its tabs, and
+ * its session data survive every path in this file.
  */
 
 import { chromium } from "playwright-core";
 import type { Browser } from "playwright-core";
 import type { CdpConnectOptions, CdpSessionInfo, CdpTransport } from "./connection.ts";
-import { CdpUnavailableError, sanitizeError } from "../errors.ts";
+import { CdpDisconnectedError, CdpUnavailableError, sanitizeError } from "../errors.ts";
 
 /**
  * Attach-only CDP transport backed by playwright-core.
  *
- * `disconnect()` detaches from the browser; it never terminates the browser
- * process, so an existing user session survives.
+ * A connect that is still in flight when `disconnect()` runs is marked
+ * abandoned. If the browser object lands afterwards, the session is released
+ * immediately instead of being left attached with no owner. Without this, a
+ * timed-out attach would strand a live CDP session.
  */
 export class PlaywrightCdpTransport implements CdpTransport {
   private browser: Browser | null = null;
+  private abandoned = false;
 
   async connect(options: CdpConnectOptions): Promise<CdpSessionInfo> {
+    this.abandoned = false;
+
+    let browser: Browser;
     try {
-      const browser = await chromium.connectOverCDP(options.endpoint, {
+      browser = await chromium.connectOverCDP(options.endpoint, {
         // Playwright's default is 30s; 0 disables its timeout entirely.
         ...(options.timeoutMs > 0 ? { timeout: options.timeoutMs } : {}),
         // Same-host loopback: allow filesystem-based optimizations.
         isLocal: true,
       });
-      this.browser = browser;
-      return { endpoint: options.endpoint, browserVersion: browser.version() };
     } catch (error) {
       throw new CdpUnavailableError(
         `Failed to attach to CloakBrowser at ${options.endpoint}: ${sanitizeError(error)}`,
         { cause: error },
       );
     }
+
+    if (this.abandoned) {
+      // A detach ran while this attach was in flight. Release the session it
+      // just opened so nothing outlives the abandoned connect().
+      await closeQuietly(browser);
+      throw new CdpDisconnectedError("CDP session released after detach");
+    }
+
+    this.browser = browser;
+    return { endpoint: options.endpoint, browserVersion: browser.version() };
   }
 
   async disconnect(): Promise<void> {
     const browser = this.browser;
     this.browser = null;
-    if (browser === null) {
+
+    if (browser !== null) {
+      await closeQuietly(browser);
       return;
     }
-    // Attach-only: closing detaches the CDP transport. The browser process,
-    // its tabs, and its session data are left untouched.
-    try {
-      await browser.close();
-    } catch {
-      // Detach is best-effort. Nothing to recover, and the manager is already
-      // marked disconnected.
-    }
+
+    // No handle registered yet: a connect is in flight. Mark it abandoned so
+    // the session it opens is released the moment it lands.
+    this.abandoned = true;
+  }
+}
+
+async function closeQuietly(browser: Browser): Promise<void> {
+  try {
+    await browser.close();
+  } catch {
+    // Detach is best-effort. Nothing to recover, and the manager is already
+    // marked disconnected.
   }
 }
 
