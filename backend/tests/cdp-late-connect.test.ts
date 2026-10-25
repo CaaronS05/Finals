@@ -58,6 +58,10 @@ describe("cdp: late connect after timeout", () => {
     assert.equal(transport.lateSessionReleased, true);
   });
 
+  // Promise.race attaches a handler to every participant when it is created,
+  // so a losing attach that rejects later cannot become an unhandled
+  // rejection. This test guards that guarantee against a future refactor that
+  // races the promises differently.
   it("does not raise an unhandled rejection when a late attach fails", async () => {
     const unhandled: unknown[] = [];
     const onUnhandled = (reason: unknown) => {

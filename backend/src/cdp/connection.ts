@@ -182,11 +182,6 @@ export class CdpConnection {
       return await Promise.race([attached, promise]);
     } finally {
       clearTimeout(timer);
-      // If the attach rejects after the race already settled (timeout or a
-      // concurrent detach won), Promise.race ignores it. Attach a no-op
-      // handler so Node does not raise an unhandled rejection and kill the
-      // process. The session, if any, is released by the transport.
-      attached.catch(() => {});
     }
   }
 

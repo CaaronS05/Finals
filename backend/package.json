@@ -13,8 +13,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
-    "test": "node --test \"tests/**/*.test.ts\"",
-    "test:watch": "node --test --watch \"tests/**/*.test.ts\""
+    "test": "node --test \"tests/*.test.ts\"",
+    "test:live": "node --test \"tests/live/*.test.ts\"",
+    "test:watch": "node --test --watch \"tests/*.test.ts\""
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

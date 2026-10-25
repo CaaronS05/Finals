@@ -1,10 +1,11 @@
-# DLLM Finals — Backend (F0)
+# DLLM Finals — Backend (F1)
 
 Meteora DLMM pool & wallet intelligence backend. Local-first, browser-assisted
 data acquisition, PostgreSQL as the eventual primary store.
 
-This repository is in **phase F0**: a backend foundation only. No scraping,
-no ETL, no database, no scan orchestration.
+This repository is in **phase F1**: the backend foundation plus verified live
+CloakBrowser connectivity. No scraping, no ETL, no database, no scan
+orchestration.
 
 ## Status labels
 
@@ -39,8 +40,9 @@ one pool per job, at most one active scan job globally.
 | CDP connection boundary (interface + manager) | IMPLEMENTED, TESTED |
 | Fake CDP transport for tests | IMPLEMENTED, TESTED |
 | Typed, sanitized error hierarchy | IMPLEMENTED, TESTED |
-| Playwright-core CDP adapter | IMPLEMENTED, UNVERIFIED |
-| CloakBrowser live attach | UNVERIFIED |
+| Playwright-core CDP adapter | IMPLEMENTED, TESTED (live) |
+| CloakBrowser live attach | IMPLEMENTED, TESTED (live) |
+| Live CDP regression test (opt-in) | IMPLEMENTED, TESTED |
 | LP Agent scraping | NOT IMPLEMENTED |
 | Fabriq scraping | NOT IMPLEMENTED |
 | PostgreSQL, schema, migrations | NOT IMPLEMENTED |
@@ -61,13 +63,18 @@ one pool per job, at most one active scan job globally.
 │   │   └── cdp/
 │   │       ├── connection.ts            Connection boundary + fake transport
 │   │       ├── endpoint.ts              Endpoint policy (9223, no 9222)
-│   │       ├── playwright-transport.ts  Real adapter (UNVERIFIED)
+│   │       ├── playwright-transport.ts  Real adapter (verified live)
+│   │       ├── fake-transport.ts        In-memory fake for tests
 │   │       └── index.ts
 │   └── tests/
 │       ├── config.test.ts
 │       ├── http.test.ts
 │       ├── cdp-connection.test.ts
-│       └── cdp-endpoint.test.ts
+│       ├── cdp-endpoint.test.ts
+│       ├── cdp-late-connect.test.ts
+│       ├── cdp-failure-recovery.test.ts
+│       └── live/
+│           └── cdp-live.test.ts         Opt-in, LIVE_CDP=1 only
 ├── docs/
 │   └── architecture/
 │       └── F0_BACKEND_FOUNDATION.md
@@ -104,7 +111,8 @@ Run from `backend/`, or prefix with `npm --prefix backend` from the repo root.
 | `npm run typecheck` | `tsc --noEmit` over `src/` and `tests/` |
 | `npm run build` | Emit `dist/` from `src/` |
 | `npm start` | Run the built server from `dist/server.js` |
-| `npm test` | Node test runner over `tests/` |
+| `npm test` | Offline suite over `tests/*.test.ts` (no browser needed) |
+| `npm run test:live` | Live CDP verification; needs `LIVE_CDP=1` and a running CloakBrowser |
 
 ## Health endpoint
 
@@ -158,9 +166,42 @@ released rather than left attached with no owner. `close()` on a CDP-attached
 browser detaches the transport only; the browser process is never terminated.
 
 The real adapter uses `playwright-core`'s `chromium.connectOverCDP`, the same
-mechanism the legacy repository uses. **Its compatibility with the current
-CloakBrowser build is UNVERIFIED** — no live instance was probed during F0.
-Verification requires a running CloakBrowser on `9223` and is deferred to F1.
+mechanism the legacy repository uses.
+
+## Live verification (F1)
+
+The adapter was verified against a real CloakBrowser on 2026-10-25.
+
+| Item | Observed |
+|---|---|
+| CDP endpoint | `http://127.0.0.1:9223` reachable, `/json/version` returned HTTP 200 |
+| Browser | Chrome/145.0.7632.109 |
+| Protocol | 1.3 |
+| Real attach | succeeded |
+| Connected state recognized | yes |
+| Disconnect | succeeded |
+| Disconnected state recognized | yes |
+| Reconnect | succeeded |
+| Browser after detach | still running, same version, endpoint still reachable |
+| Tabs modified | none |
+| Sessions left owned by DLLM | none |
+
+Run the live test explicitly. It is disabled by default and never runs as part
+of `npm test`:
+
+```bash
+# 1. Start CloakBrowser with CDP on 9223 (do this yourself, outside this repo)
+# 2. Arm and run the live verification
+LIVE_CDP=1 npm --prefix backend run test:live
+```
+
+The live test is read-only with respect to the browser: it attaches, checks
+state, detaches, and reattaches. It never navigates a tab, reads cookies or
+session state, creates or deletes a profile, or changes a persistent setting.
+A failure always detaches in a `finally` block, so no session outlives the run.
+
+`npm test` runs only `tests/*.test.ts`, so the live test is excluded by glob
+and needs no browser.
 
 ## What is NOT implemented
 
@@ -171,18 +212,20 @@ Verification requires a running CloakBrowser on `9223` and is deferred to F1.
 - Historical data import
 - Any write to the legacy Rahasia repository or its data
 
-## Roadmap (PROPOSED)
+## Roadmap
 
 | Phase | Scope |
 |---|---|
-| F1 | Live CloakBrowser attach verification; LP Agent workflow behind the CDP boundary |
-| F2 | Fabriq workflow; HTTP endpoint integration |
-| F3 | PostgreSQL schema and migrations; canonical write durability |
-| F4 | One-pool scan job; global single-job lock; Latest State + Historical Evidence |
-| F5 | Selective raw retention; wallet enrichment for pool-local LP activity |
-| F6 | Frontend as a separate application |
+| F1 | Live CloakBrowser attach verification — DONE |
+| F2 | LP Agent workflow behind the CDP boundary |
+| F3 | Fabriq workflow; HTTP endpoint integration |
+| F4 | PostgreSQL schema and migrations; canonical write durability |
+| F5 | One-pool scan job; global single-job lock; Latest State + Historical Evidence |
+| F6 | Selective raw retention; wallet enrichment for pool-local LP activity |
+| F7 | Frontend as a separate application |
 
-Nothing above F0 is built. Each phase needs its own design and approval.
+F1 is implemented and verified. Nothing above F1 is built. Each phase needs its
+own design and approval.
 
 ## Data safety
 
@@ -199,6 +242,6 @@ Executed in this phase on Node v24.22.1:
 |---|---|
 | `npm --prefix backend run typecheck` | exit 0 |
 | `npm --prefix backend run build` | exit 0, emits `dist/` |
-| `npm --prefix backend test` | exit 0, 50 tests, 50 pass, 0 fail |
+| `npm --prefix backend test` | exit 0, 58 tests, 58 pass, 0 fail |
 | `node backend/dist/server.js` + `curl /health` | exit 0, `{"status":"ok","service":"dllm-backend"}` |
 | Server startup with no CloakBrowser | exit 0, port 9223 confirmed closed, server unaffected |

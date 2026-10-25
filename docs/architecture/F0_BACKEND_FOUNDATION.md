@@ -1,7 +1,11 @@
 # F0 — Backend Foundation & CDP Architecture
 
-Status: **IMPLEMENTED**. Test suite green. Playwright CDP adapter **UNVERIFIED**
-against a live CloakBrowser.
+Status: **IMPLEMENTED**. Offline suite green. Playwright CDP adapter **TESTED
+against a live CloakBrowser** in F1 (2026-10-25).
+
+This document describes the F0 foundation and the F1 live verification that
+followed it. Section 6 records the compatibility evidence; section 11 records
+the F1 live run.
 
 ## 1. Module boundaries
 
@@ -90,14 +94,16 @@ Rules enforced by `CdpConnection`:
 Timeout handling: `Promise.race([attach, timeout])` with the timer always
 cleared in `finally`. `timeoutMs: 0` disables the timeout and skips the race.
 
-Late-connect handling (corrected in the F0 review pass): winning the race does
-not stop the browser from attaching afterwards. When the timeout wins, the
-manager detaches, and the in-flight attach is marked abandoned. If that attach
-then lands, the transport releases the session it just opened instead of
-registering it, so nothing survives the abandoned `connect()`. A late rejection
-is swallowed with a no-op handler because `Promise.race` already settled; left
-unhandled it would kill the process. `CdpConnection` never reports a
-late-landing session as connected, and a second `disconnect()` is a no-op.
+Late-connect handling: winning the race does not stop the browser from attaching
+afterwards. When the timeout wins, the manager detaches, and the in-flight
+attach is marked abandoned. If that attach then lands, the transport releases
+the session it just opened instead of registering it, so nothing survives the
+abandoned `connect()`. `CdpConnection` never reports a late-landing session as
+connected, and a second `disconnect()` is a no-op.
+
+A late rejection needs no extra handling: `Promise.race` attaches a rejection
+handler to every participant at construction, so the loser is already handled.
+See section 11 for the correction of the earlier claim.
 
 Error normalization happens once, at the boundary. A raw transport failure
 becomes `CdpUnavailableError` whose message contains the endpoint and a
@@ -146,12 +152,19 @@ until F1.
 - `playwright-core` installs with no bundled browser (~14 MB), so the
   dependency costs no browser toolchain.
 
-**UNVERIFIED:**
+**VERIFIED LIVE (F1, 2026-10-25):**
 
-- That a CloakBrowser instance currently accepts a CDP attach on `9223`. No
-  live probe was performed in F0. Port 9223 was confirmed *closed* on the
-  development machine during F0 testing, which is why the adapter is
-  documented UNVERIFIED rather than TESTED.
+- A CloakBrowser instance accepted a real `connectOverCDP` attach on `9223`.
+- Browser reported `Chrome/145.0.7632.109`, protocol `1.3`.
+- Attach, disconnect, and reconnect all succeeded through the existing
+  `CdpConnection` / `PlaywrightCdpTransport` pair.
+- After detach the browser remained running, the endpoint stayed reachable,
+  and no tab was created, closed, or navigated.
+- No session handle remained owned by the backend after disconnect.
+
+During F0, port `9223` was confirmed *closed* on the development machine,
+which is why the adapter was then documented UNVERIFIED rather than TESTED.
+F1 re-ran the same check with a browser running and recorded the result above.
 
 ## 7. Endpoint policy
 
@@ -174,6 +187,8 @@ differently.
 | `cdp-connection.test.ts` | 16 | lazy start, connect, disconnect, idempotent detach, double-connect refusal, failure classification, timeout typing, timer cleanup, no secret leakage into messages |
 | `cdp-endpoint.test.ts` | 9 | 9223 default, trailing-slash normalization, 9222 refusal, non-loopback refusal, malformed refusal, boolean helper, health with an unreachable CDP endpoint, startup without a browser |
 | `cdp-late-connect.test.ts` | 7 | late-connect release after timeout, single detach, no unhandled rejection, reusability, session-slot hygiene |
+| `cdp-failure-recovery.test.ts` | 8 | unreachable endpoint, refused connection, repeated connect/disconnect, in-flight refusal, no handle left owned, forbidden port 9222 |
+| `live/cdp-live.test.ts` | 1 | real attach, state recognition, disconnect, reconnect, browser survival — armed only by `LIVE_CDP=1` |
 
 All browser-dependent tests use `FakeCdpTransport`. The suite requires no
 CloakBrowser, no network, no LP Agent, no Fabriq, no PostgreSQL, and no
@@ -181,7 +196,9 @@ production dataset. No test uses a wall-clock timer: a slow attach is parked
 on a promise the test releases explicitly via `land()`, so timing assertions
 are deterministic rather than guessed.
 
-50 tests, all passing.
+58 tests, all passing. The live test is excluded from `npm test` by glob
+(`tests/*.test.ts`, not `tests/**/*.test.ts`) and runs only under
+`npm run test:live`.
 
 ## 9. Verification record
 
@@ -190,19 +207,66 @@ Node v24.22.1, macOS, run from `backend/`:
 | Command | Exit | Result |
 |---|---|---|
 | `npm run typecheck` | 0 | no diagnostics |
-| `npm run build` | 0 | emits `dist/` (10 modules) |
-| `npm test` | 0 | 50 tests, 50 pass, 0 fail |
+| `npm run build` | 0 | emits `dist/` (11 modules) |
+| `npm test` | 0 | 58 tests, 58 pass, 0 fail |
+| `npm run test:live` (unarmed) | 0 | 1 test, 1 pass, 0 fail; no browser touched |
+| `LIVE_CDP=1 npm run test:live` | 0 | 1 test, 1 pass, 0 fail; real attach verified |
 | `node dist/server.js` + `curl /health` | 0 | `{"status":"ok","service":"dllm-backend"}` |
 | `node dist/server.js` with port 9223 closed | 0 | server starts and serves; no CDP attempt |
 
-## 10. What F1 must do
+## 10. F1 live run (2026-10-25)
 
-1. Start CloakBrowser locally and probe `http://127.0.0.1:9223/json/version`.
-2. Run a real `PlaywrightCdpTransport` attach and record the outcome.
-3. If attach succeeds, promote the adapter from UNVERIFIED to TESTED and add a
-   live-marked test that is skipped by default.
-4. If attach fails, diagnose (browser build, CDP flags, port) before any
-   scraping code is written.
+Executed against a locally started CloakBrowser. The backend never launched,
+terminated, or reconfigured it.
 
-No scraping, ETL, database, or scan work is authorized in F1 until step 2
+| Step | Result |
+|---|---|
+| Probe `GET /json/version` (read-only) | HTTP 200, `Chrome/145.0.7632.109`, protocol `1.3` |
+| Read-only tab snapshot before attach | 1 target, `about:blank` |
+| Real `connectOverCDP` attach | succeeded |
+| Manager state after attach | `connected`, `isConnected() === true`, session info present with a non-empty browser version |
+| Disconnect | succeeded |
+| Manager state after disconnect | `disconnected`, session info `null` |
+| Browser survival after disconnect | endpoint still HTTP 200, same browser version, same PID |
+| Reconnect | succeeded |
+| Final state | detached, browser alive, no session owned |
+| Tabs created, closed, or navigated | none |
+| Provider requests (LP Agent, Fabriq) | none |
+
+The live test lives in `tests/live/cdp-live.test.ts` and is armed only by
+`LIVE_CDP=1`. `npm test` cannot reach it: the glob is `tests/*.test.ts`, which
+excludes the `live/` subdirectory. Unarmed, it reports that it did not run
+rather than silently passing.
+
+## 11. Corrected finding: `Promise.race` and unhandled rejections
+
+The F0 correction commit added `attached.catch(() => {})` with a comment
+claiming a losing promise in `Promise.race` would otherwise raise
+`unhandledRejection` and could kill the process. That claim is **wrong**.
+
+`Promise.race` attaches a rejection handler to every participant at the moment
+it is constructed. A losing attach that rejects after the race has settled is
+therefore already handled and never becomes an unhandled rejection. Verified
+directly: a losing promise rejecting 100 ms after a 10 ms timeout produced no
+`unhandledRejection` and the process survived.
+
+The handler was harmless but misleading, so it was removed in F1. The
+regression test that guards the behaviour was kept, with its rationale
+corrected to state what `Promise.race` actually guarantees.
+
+## 12. What F2 must do
+
+1. Add the LP Agent connector behind the existing CDP boundary. It receives a
+   `CdpConnection` and must not reach for a transport of its own.
+2. The first LP Agent step is read-only observation: navigate a tab the user
+   already has open, or open one explicitly, and record the observed page
+   contract before writing extraction logic.
+3. Live verification follows the F1 pattern: an opt-in test armed by an
+   environment variable, never part of `npm test`, with cleanup in a `finally`
+   block.
+4. Any navigation or session interaction needs explicit approval, because F1
+   verified attach and detach only — not that touching a page is safe for the
+   user's session.
+
+No scraping, ETL, database, or scan work is authorized in F2 until step 2
 produces a recorded result.
