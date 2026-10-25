@@ -1,11 +1,11 @@
-# DLLM Finals — Backend (F1)
+# DLLM Finals — Backend (F2-A)
 
 Meteora DLMM pool & wallet intelligence backend. Local-first, browser-assisted
 data acquisition, PostgreSQL as the eventual primary store.
 
-This repository is in **phase F1**: the backend foundation plus verified live
-CloakBrowser connectivity. No scraping, no ETL, no database, no scan
-orchestration.
+This repository is in **phase F2-A**: the backend foundation, verified live
+CloakBrowser connectivity, and the LP Agent connector foundation. No scraping,
+no ETL, no database, no scan orchestration, and no live provider request.
 
 ## Status labels
 
@@ -43,6 +43,12 @@ one pool per job, at most one active scan job globally.
 | Playwright-core CDP adapter | IMPLEMENTED, TESTED (live) |
 | CloakBrowser live attach | IMPLEMENTED, TESTED (live) |
 | Live CDP regression test (opt-in) | IMPLEMENTED, TESTED |
+| LP Agent connector contracts | IMPLEMENTED, TESTED (offline) |
+| LP Agent pool address validation | IMPLEMENTED, TESTED (offline) |
+| LP Agent response mapping | IMPLEMENTED, TESTED (offline) |
+| LP Agent pagination bookkeeping | IMPLEMENTED, TESTED (offline) |
+| LP Agent connector errors | IMPLEMENTED, TESTED (offline) |
+| LP Agent transport execution | NOT IMPLEMENTED (F2-B) |
 | LP Agent scraping | NOT IMPLEMENTED |
 | Fabriq scraping | NOT IMPLEMENTED |
 | PostgreSQL, schema, migrations | NOT IMPLEMENTED |
@@ -66,6 +72,14 @@ one pool per job, at most one active scan job globally.
 │   │       ├── playwright-transport.ts  Real adapter (verified live)
 │   │       ├── fake-transport.ts        In-memory fake for tests
 │   │       └── index.ts
+│   └── connectors/
+│       └── lpagent/
+│           ├── pool-address.ts          Case-preserving input contract
+│           ├── contracts.ts             Typed contracts + transport seam
+│           ├── mapping.ts               Provider envelope mapping
+│           ├── pagination.ts            Page bookkeeping
+│           ├── errors.ts                Typed connector errors
+│           └── connector.ts             Orchestrator over injected transport
 │   └── tests/
 │       ├── config.test.ts
 │       ├── http.test.ts
@@ -73,11 +87,13 @@ one pool per job, at most one active scan job globally.
 │       ├── cdp-endpoint.test.ts
 │       ├── cdp-late-connect.test.ts
 │       ├── cdp-failure-recovery.test.ts
+│       ├── lpagent-connector.test.ts
 │       └── live/
 │           └── cdp-live.test.ts         Opt-in, LIVE_CDP=1 only
 ├── docs/
 │   └── architecture/
-│       └── F0_BACKEND_FOUNDATION.md
+│       ├── F0_BACKEND_FOUNDATION.md
+│       └── F2A_LPAGENT_CONNECTOR.md
 ├── .env.example
 └── .gitignore
 ```
@@ -113,6 +129,10 @@ Run from `backend/`, or prefix with `npm --prefix backend` from the repo root.
 | `npm start` | Run the built server from `dist/server.js` |
 | `npm test` | Offline suite over `tests/*.test.ts` (no browser needed) |
 | `npm run test:live` | Live CDP verification; needs `LIVE_CDP=1` and a running CloakBrowser |
+
+The LP Agent connector tests run inside `npm test` and are fully offline. They
+never open a socket, import playwright, attach to a browser, or contact
+`api.lpagent.io`.
 
 ## Health endpoint
 
@@ -206,6 +226,7 @@ and needs no browser.
 ## What is NOT implemented
 
 - LP Agent or Fabriq scraping, and any request to an external provider
+- LP Agent transport execution, navigation, or live acquisition (F2-B/F2-C)
 - Wallet enrichment, pool scanning, scan jobs or orchestration
 - PostgreSQL, schema, migrations, raw production storage, ETL
 - A frontend application
@@ -217,15 +238,17 @@ and needs no browser.
 | Phase | Scope |
 |---|---|
 | F1 | Live CloakBrowser attach verification — DONE |
-| F2 | LP Agent workflow behind the CDP boundary |
+| F2-A | LP Agent connector foundation (contracts, mapping, pagination) — DONE |
+| F2-B | LP Agent browser transport behind the CDP boundary |
+| F2-C | Live pagination and acquisition verification |
 | F3 | Fabriq workflow; HTTP endpoint integration |
 | F4 | PostgreSQL schema and migrations; canonical write durability |
 | F5 | One-pool scan job; global single-job lock; Latest State + Historical Evidence |
 | F6 | Selective raw retention; wallet enrichment for pool-local LP activity |
 | F7 | Frontend as a separate application |
 
-F1 is implemented and verified. Nothing above F1 is built. Each phase needs its
-own design and approval.
+F1 and F2-A are implemented and verified. Nothing above F2-A is built. Each
+phase needs its own design and approval.
 
 ## Data safety
 
@@ -242,6 +265,6 @@ Executed in this phase on Node v24.22.1:
 |---|---|
 | `npm --prefix backend run typecheck` | exit 0 |
 | `npm --prefix backend run build` | exit 0, emits `dist/` |
-| `npm --prefix backend test` | exit 0, 58 tests, 58 pass, 0 fail |
+| `npm --prefix backend test` | exit 0, 103 tests, 103 pass, 0 fail |
 | `node backend/dist/server.js` + `curl /health` | exit 0, `{"status":"ok","service":"dllm-backend"}` |
 | Server startup with no CloakBrowser | exit 0, port 9223 confirmed closed, server unaffected |

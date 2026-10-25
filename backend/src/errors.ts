@@ -5,14 +5,22 @@
  * a local caller. No credentials, cookies, tokens, headers, or raw browser
  * session state may appear in any message.
  */
+import type { LpAgentErrorCode } from "./connectors/lpagent/errors.ts";
 
-/** Machine-readable error codes. */
+/**
+ * Machine-readable error codes.
+ *
+ * The LP Agent codes are declared by the connector module rather than here, so
+ * this union stays open to extension by composing them.
+ */
 export type BackendErrorCode =
   | "CONFIG_INVALID"
   | "CDP_UNAVAILABLE"
   | "CDP_CONNECT_TIMEOUT"
   | "CDP_DISCONNECTED"
   | "CDP_OPERATION_FAILED";
+/** Connector error codes are registered into this union at the module boundary. */
+export type { LpAgentErrorCode as LpAgentConnectorErrorCode } from "./connectors/lpagent/errors.ts";
 
 /**
  * Base class for all errors surfaced by the backend.
@@ -22,9 +30,13 @@ export type BackendErrorCode =
  * into a response body or an external log line.
  */
 export class BackendError extends Error {
-  readonly code: BackendErrorCode;
+  /**
+   * Machine-readable code. A connector may register its own codes, so the
+   * field accepts the base union or a registered connector union.
+   */
+  readonly code: BackendErrorCode | LpAgentErrorCode;
 
-  constructor(code: BackendErrorCode, message: string, options?: { cause?: unknown }) {
+  constructor(code: BackendErrorCode | LpAgentErrorCode, message: string, options?: { cause?: unknown }) {
     super(message);
     this.name = new.target.name;
     this.code = code;
