@@ -1,11 +1,12 @@
-# DLLM Finals — Backend (F2-A)
+# DLLM Finals — Backend (F2-B)
 
 Meteora DLMM pool & wallet intelligence backend. Local-first, browser-assisted
 data acquisition, PostgreSQL as the eventual primary store.
 
-This repository is in **phase F2-A**: the backend foundation, verified live
-CloakBrowser connectivity, and the LP Agent connector foundation. No scraping,
-no ETL, no database, no scan orchestration, and no live provider request.
+This repository is in **phase F2-B**: the backend foundation, verified live
+CloakBrowser connectivity, the LP Agent connector foundation, and the LP Agent
+browser transport. No scraping, no ETL, no database, no scan orchestration, and
+no live provider request.
 
 ## Status labels
 
@@ -48,7 +49,12 @@ one pool per job, at most one active scan job globally.
 | LP Agent response mapping | IMPLEMENTED, TESTED (offline) |
 | LP Agent pagination bookkeeping | IMPLEMENTED, TESTED (offline) |
 | LP Agent connector errors | IMPLEMENTED, TESTED (offline) |
-| LP Agent transport execution | NOT IMPLEMENTED (F2-B) |
+| LP Agent browser execution boundary | IMPLEMENTED, TESTED (offline) |
+| LP Agent owned-page lifecycle | IMPLEMENTED, TESTED (offline) |
+| LP Agent browser transport | IMPLEMENTED, TESTED (offline) |
+| LP Agent Playwright executor adapter | IMPLEMENTED, UNVERIFIED (live) |
+| LP Agent transport execution | IMPLEMENTED, TESTED (offline) |
+| Live LP Agent acquisition | BLOCKED until F2-C |
 | LP Agent scraping | NOT IMPLEMENTED |
 | Fabriq scraping | NOT IMPLEMENTED |
 | PostgreSQL, schema, migrations | NOT IMPLEMENTED |
@@ -79,7 +85,12 @@ one pool per job, at most one active scan job globally.
 │           ├── mapping.ts               Provider envelope mapping
 │           ├── pagination.ts            Page bookkeeping
 │           ├── errors.ts                Typed connector errors
-│           └── connector.ts             Orchestrator over injected transport
+│           ├── connector.ts             Orchestrator over injected transport
+│           ├── browser-execution.ts     Browser seam, origin allowlist
+│           ├── owned-pages.ts           DLLM-owned page lifecycle
+│           ├── browser-transport.ts     LpAgentTransport implementation
+│           ├── playwright-executor.ts   Real adapter (UNVERIFIED live)
+│           └── fake-browser-executor.ts  In-memory fake for tests
 │   └── tests/
 │       ├── config.test.ts
 │       ├── http.test.ts
@@ -88,12 +99,14 @@ one pool per job, at most one active scan job globally.
 │       ├── cdp-late-connect.test.ts
 │       ├── cdp-failure-recovery.test.ts
 │       ├── lpagent-connector.test.ts
+│       ├── lpagent-browser-transport.test.ts
 │       └── live/
 │           └── cdp-live.test.ts         Opt-in, LIVE_CDP=1 only
 ├── docs/
 │   └── architecture/
 │       ├── F0_BACKEND_FOUNDATION.md
-│       └── F2A_LPAGENT_CONNECTOR.md
+│       ├── F2A_LPAGENT_CONNECTOR.md
+│       └── F2B_LPAGENT_BROWSER_TRANSPORT.md
 ├── .env.example
 └── .gitignore
 ```
@@ -226,7 +239,7 @@ and needs no browser.
 ## What is NOT implemented
 
 - LP Agent or Fabriq scraping, and any request to an external provider
-- LP Agent transport execution, navigation, or live acquisition (F2-B/F2-C)
+- LP Agent navigation, live acquisition, and retry orchestration (F2-C)
 - Wallet enrichment, pool scanning, scan jobs or orchestration
 - PostgreSQL, schema, migrations, raw production storage, ETL
 - A frontend application
@@ -239,7 +252,7 @@ and needs no browser.
 |---|---|
 | F1 | Live CloakBrowser attach verification — DONE |
 | F2-A | LP Agent connector foundation (contracts, mapping, pagination) — DONE |
-| F2-B | LP Agent browser transport behind the CDP boundary |
+| F2-B | LP Agent browser transport behind the CDP boundary — DONE |
 | F2-C | Live pagination and acquisition verification |
 | F3 | Fabriq workflow; HTTP endpoint integration |
 | F4 | PostgreSQL schema and migrations; canonical write durability |
@@ -247,8 +260,8 @@ and needs no browser.
 | F6 | Selective raw retention; wallet enrichment for pool-local LP activity |
 | F7 | Frontend as a separate application |
 
-F1 and F2-A are implemented and verified. Nothing above F2-A is built. Each
-phase needs its own design and approval.
+F1, F2-A, and F2-B are implemented and verified offline. Nothing above F2-B is
+built. Each phase needs its own design and approval.
 
 ## Data safety
 
@@ -265,6 +278,6 @@ Executed in this phase on Node v24.22.1:
 |---|---|
 | `npm --prefix backend run typecheck` | exit 0 |
 | `npm --prefix backend run build` | exit 0, emits `dist/` |
-| `npm --prefix backend test` | exit 0, 103 tests, 103 pass, 0 fail |
+| `npm --prefix backend test` | exit 0, 136 tests, 136 pass, 0 fail |
 | `node backend/dist/server.js` + `curl /health` | exit 0, `{"status":"ok","service":"dllm-backend"}` |
 | Server startup with no CloakBrowser | exit 0, port 9223 confirmed closed, server unaffected |
